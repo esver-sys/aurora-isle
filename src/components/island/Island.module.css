@@ -61,3 +61,69 @@
 .iconBtn:active {
   background: rgba(255, 255, 255, 0.2);
 }
+
+.settingsContent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settingsRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settingsLabel {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.settingsFooter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 4px;
+  border-left: 1px solid rgba(255, 255, 255, 0.15);
+  margin-left: 4px;
+}
+
+.settingsVersion {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+}
+
+.toggle {
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  cursor: pointer;
+  position: relative;
+  padding: 0;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+
+.toggleOn {
+  background: rgba(0, 150, 255, 0.8);
+}
+
+.toggleKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s ease;
+}
+
+.toggleOn .toggleKnob {
+  transform: translateX(14px);
+}

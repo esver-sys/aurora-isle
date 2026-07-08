@@ -5,7 +5,7 @@ mod models;
 mod services;
 mod state;
 
-use commands::{config, island, pin, system};
+use commands::{config, island, pin, screenshot, system};
 use state::AppState;
 use tauri::Manager;
 
@@ -32,6 +32,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -43,6 +44,7 @@ pub fn run() {
 
             std::fs::create_dir_all(app_data_dir.join("pins"))?;
             std::fs::create_dir_all(app_data_dir.join("thumbs"))?;
+            std::fs::create_dir_all(app_data_dir.join("snips"))?;
 
             let db_path = app_data_dir.join("app.db");
             let connection = services::database::init_database(&db_path)?;
@@ -67,6 +69,8 @@ pub fn run() {
             config::set_config,
             system::toggle_autostart,
             system::is_autostart_enabled,
+            screenshot::capture_screen,
+            screenshot::crop_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running aurora-isle");
