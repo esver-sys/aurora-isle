@@ -22,6 +22,18 @@
         "skipTaskbar": true,
         "resizable": false,
         "shadow": false
+      },
+      {
+        "label": "settings",
+        "title": "Aurora Isle 设置",
+        "url": "index.html",
+        "width": 720,
+        "height": 520,
+        "transparent": true,
+        "decorations": false,
+        "resizable": false,
+        "visible": false,
+        "shadow": false
       }
     ],
     "security": {
