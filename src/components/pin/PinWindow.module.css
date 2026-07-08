@@ -5,6 +5,7 @@
   align-items: center;
   justify-content: center;
   position: relative;
+  cursor: move;
 }
 
 .pinImage {
@@ -30,6 +31,7 @@
   border-radius: 16px;
   padding: 4px 8px;
   white-space: nowrap;
+  cursor: default;
 }
 
 .toolBtn {
@@ -44,12 +46,18 @@
   transition: background 0.15s ease;
 }
 
-.toolBtn:hover {
+.toolBtn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.12);
+}
+
+.toolBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .slider {
   width: 60px;
   height: 4px;
   accent-color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
 }

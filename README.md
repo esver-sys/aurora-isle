@@ -38,6 +38,7 @@ aurora-isle/
 │   ├── components/         # UI 组件 (按子系统组织)
 │   │   ├── island/         # S1 灵动岛
 │   │   ├── pin/            # S2 贴图
+│   │   ├── snip/           # S6 截图选区
 │   │   └── shared/         # 共享组件
 │   ├── stores/             # Zustand 状态
 │   ├── hooks/              # 自定义 Hooks
@@ -65,6 +66,12 @@ aurora-isle/
 | S5 快捷微件 | 拖拽入岛/动态图标 | P1 |
 | S6 截图与 OCR | 选区截图/文字识别 | P1 |
 | S7 录屏/Launcher | 无感录屏/本地搜索 | P2 |
+
+## 当前实现要点
+
+- 截图选区窗口使用 Snipaste 风格工具条；当前只启用取消、贴图、复制，绘制类入口暂为禁用占位。
+- 贴图窗口按图片比例初始化尺寸，支持拖拽移动、缩放、旋转、透明度调整，并将变换写入 SQLite。
+- 截图复制通过 Rust 端 `arboard` 写入系统剪贴板；贴图图片存放在 AppData 的 `pins/` 目录。
 
 ## 文档
 

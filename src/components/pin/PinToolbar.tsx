@@ -1,40 +1,39 @@
-import { useState } from "react";
-import { X, RotateCw, Eye, Pin as PinIcon } from "lucide-react";
-import { updatePinTransform } from "../../api/pin";
+import { X, RotateCw, Pin as PinIcon } from "lucide-react";
+import type { PinRecord, PinTransform } from "../../types";
 import styles from "./PinWindow.module.css";
 
 interface PinToolbarProps {
-  pinId: string;
+  pin: PinRecord;
+  onTransformChange: (transform: PinTransform) => void;
   onClose: () => void;
 }
 
-export function PinToolbar({ pinId, onClose }: PinToolbarProps) {
-  const [scale, setScale] = useState(1.0);
-  const [opacity, setOpacity] = useState(1.0);
-
+export function PinToolbar({ pin, onTransformChange, onClose }: PinToolbarProps) {
   const handleScale = (v: number) => {
-    setScale(v);
-    updatePinTransform(pinId, { scale: v });
+    onTransformChange({ scale: v });
   };
 
   const handleOpacity = (v: number) => {
-    setOpacity(v);
-    updatePinTransform(pinId, { opacity: v });
+    onTransformChange({ opacity: v });
   };
 
   const handleRotate = () => {
-    const r = 90;
-    updatePinTransform(pinId, { rotation: r });
+    // 简单逻辑：每次点击顺时针旋转 90 度，并把角度限制在 0-359。
+    onTransformChange({ rotation: (pin.rotation + 90) % 360 });
   };
 
   return (
-    <div className={styles.toolbar}>
+    <div
+      className={styles.toolbar}
+      data-pin-toolbar
+      onPointerDown={(e) => e.stopPropagation()}
+    >
       <input
         type="range"
         min="0.1"
         max="3"
         step="0.1"
-        value={scale}
+        value={pin.scale}
         onChange={(e) => handleScale(parseFloat(e.target.value))}
         className={styles.slider}
         title="缩放"
@@ -47,16 +46,13 @@ export function PinToolbar({ pinId, onClose }: PinToolbarProps) {
         min="0.2"
         max="1"
         step="0.05"
-        value={opacity}
+        value={pin.opacity}
         onChange={(e) => handleOpacity(parseFloat(e.target.value))}
         className={styles.slider}
         title="透明度"
       />
-      <button className={styles.toolBtn} title="置顶">
+      <button className={styles.toolBtn} title="置顶（待实现）" disabled>
         <PinIcon size={14} color="white" />
-      </button>
-      <button className={styles.toolBtn} title="透明度">
-        <Eye size={14} color="white" />
       </button>
       <button className={styles.toolBtn} onClick={onClose} title="关闭">
         <X size={14} color="white" />

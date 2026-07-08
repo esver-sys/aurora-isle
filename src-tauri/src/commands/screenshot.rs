@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use arboard::{Clipboard, ImageData};
 use image::ImageFormat;
 use tauri::State;
 
@@ -67,4 +68,53 @@ pub async fn crop_image(source_path: String, region: CropRegion) -> Result<Strin
     cropped.save_with_format(&out_path, ImageFormat::Png)?;
 
     Ok(out_path.to_string_lossy().to_string())
+}
+
+fn image_data_from_path(path: &PathBuf) -> Result<ImageData<'static>> {
+    let img = image::open(path)?.to_rgba8();
+    let width = img.width() as usize;
+    let height = img.height() as usize;
+
+    Ok(ImageData {
+        width,
+        height,
+        bytes: std::borrow::Cow::Owned(img.into_raw()),
+    })
+}
+
+#[tauri::command]
+pub async fn copy_image_to_clipboard(image_path: String) -> Result<()> {
+    let data = image_data_from_path(&PathBuf::from(image_path))?;
+    let mut clipboard = Clipboard::new().map_err(|e| AppError::Clipboard(e.to_string()))?;
+    clipboard
+        .set_image(data)
+        .map_err(|e| AppError::Clipboard(e.to_string()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{ImageBuffer, Rgba};
+
+    #[test]
+    fn image_data_from_path_returns_rgba_clipboard_payload() {
+        let path = std::env::temp_dir().join(format!("aurora_test_{}.png", now_ts()));
+        let img = ImageBuffer::from_fn(2, 1, |x, _| {
+            if x == 0 {
+                Rgba([255u8, 0, 0, 255])
+            } else {
+                Rgba([0u8, 255, 0, 128])
+            }
+        });
+        img.save_with_format(&path, ImageFormat::Png).unwrap();
+
+        let data = image_data_from_path(&path).unwrap();
+
+        assert_eq!(data.width, 2);
+        assert_eq!(data.height, 1);
+        assert_eq!(data.bytes.len(), 8);
+
+        let _ = std::fs::remove_file(path);
+    }
 }

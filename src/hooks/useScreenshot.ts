@@ -1,8 +1,8 @@
 import { useCallback } from "react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { emit, listen } from "@tauri-apps/api/event";
-import { getAllWindows, type Window } from "@tauri-apps/api/window";
-import { captureScreen } from "../api/screenshot";
+import { getAllWindows, currentMonitor, type Window } from "@tauri-apps/api/window";
+import { captureScreen, copyImageToClipboard } from "../api/screenshot";
 import { pinImage } from "../api/pin";
 
 async function closeSnipWindow() {
@@ -16,10 +16,12 @@ export function useScreenshot() {
     try {
       await closeSnipWindow();
 
-      const result = await captureScreen();
+      const monitor = await currentMonitor();
+      if (!monitor) return;
 
-      const logicalWidth = result.width / result.scale_factor;
-      const logicalHeight = result.height / result.scale_factor;
+      const scaleFactor = monitor.scaleFactor;
+      const logicalWidth = Math.round(monitor.size.width / scaleFactor);
+      const logicalHeight = Math.round(monitor.size.height / scaleFactor);
 
       const snipWindow = new WebviewWindow("snip", {
         url: "index.html",
@@ -39,6 +41,8 @@ export function useScreenshot() {
         console.error("Snip window creation failed:", e);
       });
 
+      const capturePromise = captureScreen();
+
       const cleanup = () => {
         unlistenReady?.();
         unlistenComplete?.();
@@ -46,6 +50,7 @@ export function useScreenshot() {
       };
 
       let unlistenReady = await listen("snip:ready", async () => {
+        const result = await capturePromise;
         await emit("snip:capture", {
           tempPath: result.temp_path,
           width: result.width,
@@ -54,13 +59,24 @@ export function useScreenshot() {
         });
       });
 
-      let unlistenComplete = await listen<{ croppedPath: string | null }>(
+      let unlistenComplete = await listen<{
+        action: "pin" | "copy";
+        croppedPath: string | null;
+      }>(
         "snip:complete",
         async (event) => {
           cleanup();
           await closeSnipWindow();
           if (event.payload.croppedPath) {
-            await pinImage(event.payload.croppedPath);
+            try {
+              if (event.payload.action === "pin") {
+                await pinImage(event.payload.croppedPath);
+              } else {
+                await copyImageToClipboard(event.payload.croppedPath);
+              }
+            } catch (e) {
+              console.error("Screenshot action failed:", e);
+            }
           }
         }
       );

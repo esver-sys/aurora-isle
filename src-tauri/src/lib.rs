@@ -71,6 +71,7 @@ pub fn run() {
             system::is_autostart_enabled,
             screenshot::capture_screen,
             screenshot::crop_image,
+            screenshot::copy_image_to_clipboard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running aurora-isle");
