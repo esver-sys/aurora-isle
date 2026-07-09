@@ -48,6 +48,12 @@ const SCHEMA_V2: &str = r#"
     ALTER TABLE pins ADD COLUMN flip_v INTEGER DEFAULT 0;
 "#;
 
+/// V3 迁移：为 pins 表新增 base_width/base_height，持久化贴图显示基准尺寸
+const SCHEMA_V3: &str = r#"
+    ALTER TABLE pins ADD COLUMN base_width REAL;
+    ALTER TABLE pins ADD COLUMN base_height REAL;
+"#;
+
 /// 读取当前数据库版本号；若 schema_version 表不存在则返回 0
 fn get_db_version(conn: &Connection) -> i64 {
     conn.query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0))
@@ -64,6 +70,14 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         conn.execute_batch(SCHEMA_V2)?;
         conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (2)", [])?;
         tracing::info!("Database migrations applied (v1 -> v2)");
+    }
+
+    // V3: 新增 base_width/base_height，仅在版本 < 3 时执行
+    let current = get_db_version(conn);
+    if current < 3 {
+        conn.execute_batch(SCHEMA_V3)?;
+        conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (3)", [])?;
+        tracing::info!("Database migrations applied (v{} -> v3)", current);
     } else {
         tracing::info!("Database already at v{}", current);
     }

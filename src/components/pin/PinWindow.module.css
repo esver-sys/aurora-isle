@@ -10,8 +10,7 @@
 }
 
 .visualLayer {
-  width: 100%;
-  height: 100%;
+  /* 宽高由内联样式显式设置，不取 100%，确保旋转后视觉层尺寸不随窗口交换 */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -21,9 +20,8 @@
 }
 
 .pinImage {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
+  width: 100%;
+  height: 100%;
   user-select: none;
   -webkit-user-drag: none;
 }

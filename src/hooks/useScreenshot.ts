@@ -5,6 +5,7 @@ import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
 import { save } from "@tauri-apps/plugin-dialog";
 import { captureScreen, copyImageToClipboard, saveImageToPath, quickSaveImage, addScreenshotHistory } from "../api/screenshot";
 import { pinImage } from "../api/pin";
+import type { PinRect } from "../types";
 
 interface HistoryInfo {
   regionX: number;
@@ -67,18 +68,21 @@ export function useScreenshot() {
             monitorY: logicalY,
           });
         }),
-        listen<{ action: "pin" | "copy" | "save" | "quick_save"; croppedPath: string | null; historyInfo: HistoryInfo | null }>(
-          "snip:complete",
-          async (event) => {
-            cleanup();
-            cleanupRef.current = null;
-            await snipWin.hide();
-            if (event.payload.croppedPath) {
-              try {
-                const { action, croppedPath, historyInfo } = event.payload;
-                if (action === "pin") {
-                  await pinImage(croppedPath);
-                } else if (action === "copy") {
+        listen<{
+          action: "pin" | "copy" | "save" | "quick_save";
+          croppedPath: string | null;
+          historyInfo: HistoryInfo | null;
+          pinRect?: PinRect;
+        }>("snip:complete", async (event) => {
+          cleanup();
+          cleanupRef.current = null;
+          await snipWin.hide();
+          if (event.payload.croppedPath) {
+            try {
+              const { action, croppedPath, historyInfo, pinRect } = event.payload;
+              if (action === "pin") {
+                await pinImage(croppedPath, pinRect);
+              } else if (action === "copy") {
                   await copyImageToClipboard(croppedPath);
                 } else if (action === "save") {
                   const destPath = await save({

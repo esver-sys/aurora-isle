@@ -421,18 +421,31 @@ export function SnipWindow() {
         scaleFactor: sf,
       };
 
+      // 仅在贴图操作时传入选区屏幕坐标和尺寸，使贴图窗口出现在选区位置
+      const pinRect =
+        action === "pin"
+          ? {
+              x: (cap.monitorX ?? 0) + rect.left,
+              y: (cap.monitorY ?? 0) + rect.top,
+              width: rect.width,
+              height: rect.height,
+            }
+          : undefined;
+
+      const completePayload = { action, croppedPath, historyInfo, pinRect };
+
       if (annotationRef.current?.hasAnnotations()) {
         const annotatedPath = await annotationRef.current.exportImage();
         if (annotatedPath) {
-          await emit("snip:complete", { action, croppedPath: annotatedPath, historyInfo });
+          await emit("snip:complete", { ...completePayload, croppedPath: annotatedPath });
           return;
         }
       }
 
-      await emit("snip:complete", { action, croppedPath, historyInfo });
+      await emit("snip:complete", completePayload);
     } catch (err) {
       console.error("Crop failed:", err);
-      await emit("snip:complete", { action, croppedPath: null, historyInfo: null });
+      await emit("snip:complete", { action, croppedPath: null, historyInfo: null, pinRect: undefined });
     }
   };
 

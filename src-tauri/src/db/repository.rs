@@ -30,8 +30,10 @@ fn row_to_pin(row: &Row) -> rusqlite::Result<PinRecord> {
         hidden: row.get::<_, i32>(11)? != 0,
         flip_h: row.get::<_, i32>(12)? != 0,
         flip_v: row.get::<_, i32>(13)? != 0,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
+        base_width: row.get(14)?,
+        base_height: row.get(15)?,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
     })
 }
 
@@ -39,7 +41,7 @@ fn row_to_pin(row: &Row) -> rusqlite::Result<PinRecord> {
 const PIN_COLUMNS: &str =
     "id, file_path, thumb_path, pos_x, pos_y, scale, rotation, \
      opacity, always_on_top, locked, pinned_open, hidden, flip_h, flip_v, \
-     created_at, updated_at";
+     base_width, base_height, created_at, updated_at";
 
 pub fn get_config(conn: &Connection, key: &str) -> Result<Option<String>> {
     let mut stmt = conn.prepare("SELECT value FROM config WHERE key = ?1")?;
@@ -63,8 +65,8 @@ pub fn insert_pin(conn: &Connection, pin: &PinRecord) -> Result<()> {
         r#"INSERT INTO pins
            (id, file_path, thumb_path, pos_x, pos_y, scale, rotation,
             opacity, always_on_top, locked, pinned_open, hidden, flip_h, flip_v,
-            created_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"#,
+            base_width, base_height, created_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)"#,
         params![
             pin.id,
             pin.file_path,
@@ -80,6 +82,8 @@ pub fn insert_pin(conn: &Connection, pin: &PinRecord) -> Result<()> {
             pin.hidden as i32,
             pin.flip_h as i32,
             pin.flip_v as i32,
+            pin.base_width,
+            pin.base_height,
             pin.created_at,
             pin.updated_at,
         ],
@@ -307,6 +311,8 @@ mod tests {
             hidden: false,
             flip_h: false,
             flip_v: false,
+            base_width: None,
+            base_height: None,
             created_at: 1,
             updated_at: 1,
         }

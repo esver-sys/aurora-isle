@@ -16,6 +16,8 @@ pub struct PinRecord {
     pub hidden: bool,
     pub flip_h: bool,
     pub flip_v: bool,
+    pub base_width: Option<f64>,
+    pub base_height: Option<f64>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -37,4 +39,13 @@ pub struct PinTransform {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PinImagePayload {
     pub temp_path: String,
+}
+
+/// 截图选区的屏幕位置和尺寸（逻辑像素），用于创建位置匹配的贴图
+#[derive(Debug, Clone, Deserialize)]
+pub struct PinRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
 }

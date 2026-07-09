@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { PinRecord, PinTransform } from "../types";
+import type { PinRecord, PinTransform, PinRect } from "../types";
 
-export async function pinImage(tempPath: string): Promise<string> {
-  return await invoke("pin_image", { tempPath });
+export async function pinImage(tempPath: string, pinRect?: PinRect): Promise<string> {
+  return await invoke("pin_image", { tempPath, pinRect });
 }
 
 export async function unpinImage(id: string): Promise<void> {

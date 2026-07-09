@@ -20,9 +20,33 @@ const MOVE_STEP = 1;
 const MOVE_STEP_FAST = 10;
 const OPACITY_PRESETS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
 
+/** 将旋转角度归一化到 [0, 360) */
+function normalizeRotation(rotation: number): number {
+  return ((rotation % 360) + 360) % 360;
+}
+
+/** 判断旋转角度是否为 90° 或 270°（需要交换宽高的角度） */
+function isQuarterTurn(rotation: number): boolean {
+  const n = normalizeRotation(rotation);
+  return Math.abs(n - 90) < 0.001 || Math.abs(n - 270) < 0.001;
+}
+
+/** 根据旋转角度和缩放计算窗口尺寸（逻辑像素） */
+function computeWindowSize(
+  rotation: number,
+  scale: number,
+  baseW: number,
+  baseH: number
+): { width: number; height: number } {
+  const w = Math.max(1, Math.round(baseW * scale));
+  const h = Math.max(1, Math.round(baseH * scale));
+  return isQuarterTurn(rotation) ? { width: h, height: w } : { width: w, height: h };
+}
+
 export function PinWindow({ pinId }: PinWindowProps) {
   const [pin, setPin] = useState<PinRecord | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [baseDims, setBaseDims] = useState<{ baseW: number; baseH: number } | null>(null);
 
   // 缓存图片绝对路径，用于复制/保存操作
   const absImagePathRef = useRef<string>("");
@@ -30,27 +54,49 @@ export function PinWindow({ pinId }: PinWindowProps) {
   const menuRef = useRef<Menu | null>(null);
   // 滚轮事件可能密集触发，使用 ref 保存即时 scale，避免连续滚动时读到 React 旧状态。
   const scaleRef = useRef(1);
-  // 记录未缩放时的窗口尺寸，后续 scale 只改变窗口大小，避免图片 CSS 放大后被裁切。
-  const baseWindowSizeRef = useRef<{ width: number; height: number } | null>(null);
+  // 缓存未旋转、未缩放的基准显示尺寸 { baseW, baseH }（逻辑像素），旋转/缩放都基于此计算
+  const baseDimsRef = useRef<{ baseW: number; baseH: number } | null>(null);
 
   useEffect(() => {
     const win = getCurrentWindow();
+    baseDimsRef.current = null;
+    setBaseDims(null);
+
     (async () => {
       try {
         const record = await getPinById(pinId);
-        setPin(record);
         const absPath = await getImagePath(record.file_path);
         absImagePathRef.current = absPath;
-        setImageUrl(convertFileSrc(absPath));
 
         // 应用置顶状态到窗口
         await win.setAlwaysOnTop(record.always_on_top);
         const safeScale = Math.max(record.scale, SCALE_MIN);
         scaleRef.current = safeScale;
-        baseWindowSizeRef.current = {
-          width: window.innerWidth / safeScale,
-          height: window.innerHeight / safeScale,
-        };
+
+        // 优先使用 DB 持久化的基准尺寸；无值时从当前窗口尺寸反推（已旋转时需反交换）
+        const dbBaseW = record.base_width;
+        const dbBaseH = record.base_height;
+        if (
+          dbBaseW != null &&
+          dbBaseH != null &&
+          Number.isFinite(dbBaseW) &&
+          Number.isFinite(dbBaseH) &&
+          dbBaseW >= 1 &&
+          dbBaseH >= 1
+        ) {
+          baseDimsRef.current = { baseW: dbBaseW, baseH: dbBaseH };
+        } else {
+          const currentW = window.innerWidth / safeScale;
+          const currentH = window.innerHeight / safeScale;
+          baseDimsRef.current = isQuarterTurn(record.rotation)
+            ? { baseW: currentH, baseH: currentW }
+            : { baseW: currentW, baseH: currentH };
+        }
+
+        // 核心逻辑：baseDims 不能只写 ref。ref 更新不会触发重渲染，贴图容器不渲染时右键菜单入口也会消失。
+        setBaseDims(baseDimsRef.current);
+        setPin(record);
+        setImageUrl(convertFileSrc(absPath));
       } catch (e) {
         console.error("Failed to load pin:", e);
       }
@@ -95,43 +141,75 @@ export function PinWindow({ pinId }: PinWindowProps) {
     [pin]
   );
 
-  const resizeWindowForScale = useCallback(async (scale: number, anchor?: { x: number; y: number }) => {
-    const baseSize = baseWindowSizeRef.current;
-    if (!baseSize) return;
+  const resizeWindowForScale = useCallback(
+    async (scale: number, anchor: { x: number; y: number } | undefined, rotation: number) => {
+      const baseDims = baseDimsRef.current;
+      if (!baseDims) return;
 
-    const win = getCurrentWindow();
-    const oldWidth = window.innerWidth;
-    const oldHeight = window.innerHeight;
-    const nextWidth = Math.max(1, Math.round(baseSize.width * scale));
-    const nextHeight = Math.max(1, Math.round(baseSize.height * scale));
-    const pos = anchor && oldWidth > 0 && oldHeight > 0 ? await win.outerPosition() : null;
+      const win = getCurrentWindow();
+      const oldWidth = window.innerWidth;
+      const oldHeight = window.innerHeight;
+      const size = computeWindowSize(rotation, scale, baseDims.baseW, baseDims.baseH);
+      const nextWidth = size.width;
+      const nextHeight = size.height;
+      const pos = anchor && oldWidth > 0 && oldHeight > 0 ? await win.outerPosition() : null;
 
-    await win.setSize(new LogicalSize(nextWidth, nextHeight));
+      await win.setSize(new LogicalSize(nextWidth, nextHeight));
 
-    if (!anchor || !pos || oldWidth <= 0 || oldHeight <= 0) return;
+      if (!anchor || !pos || oldWidth <= 0 || oldHeight <= 0) return;
 
-    // 核心逻辑：滚轮缩放时根据光标在窗口内的比例反推左上角偏移，尽量保持光标下的图片位置不跳动。
-    const ratioX = anchor.x / oldWidth;
-    const ratioY = anchor.y / oldHeight;
-    const dpr = window.devicePixelRatio || 1;
-    const deltaX = Math.round((nextWidth - oldWidth) * ratioX * dpr);
-    const deltaY = Math.round((nextHeight - oldHeight) * ratioY * dpr);
-    await win.setPosition(new PhysicalPosition(pos.x - deltaX, pos.y - deltaY));
-  }, []);
+      // 滚轮缩放时根据光标在窗口内的比例反推左上角偏移，尽量保持光标下的图片位置不跳动
+      const ratioX = anchor.x / oldWidth;
+      const ratioY = anchor.y / oldHeight;
+      const dpr = window.devicePixelRatio || 1;
+      const deltaX = Math.round((nextWidth - oldWidth) * ratioX * dpr);
+      const deltaY = Math.round((nextHeight - oldHeight) * ratioY * dpr);
+      await win.setPosition(new PhysicalPosition(pos.x - deltaX, pos.y - deltaY));
+    },
+    []
+  );
 
   const applyScale = useCallback(
     async (nextScale: number, anchor?: { x: number; y: number }) => {
       if (!pin) return;
       const previousScale = scaleRef.current;
       scaleRef.current = nextScale;
-      await resizeWindowForScale(nextScale, anchor);
+      await resizeWindowForScale(nextScale, anchor, pin.rotation);
       const ok = await updateTransform({ scale: nextScale }, { scale: nextScale });
       if (!ok) {
         scaleRef.current = previousScale;
-        await resizeWindowForScale(previousScale);
+        await resizeWindowForScale(previousScale, undefined, pin.rotation);
       }
     },
     [pin, resizeWindowForScale, updateTransform]
+  );
+
+  // 统一的旋转处理：新旧旋转的「是否交换」状态不同时，交换窗口尺寸并保持中心不动
+  const applyRotation = useCallback(
+    async (nextRotation: number) => {
+      if (!pin) return;
+      const prevRotation = pin.rotation;
+
+      // 仅在交换状态切换时调整窗口尺寸和位置
+      if (isQuarterTurn(prevRotation) !== isQuarterTurn(nextRotation)) {
+        const baseDims = baseDimsRef.current;
+        if (baseDims) {
+          const oldSize = computeWindowSize(prevRotation, scaleRef.current, baseDims.baseW, baseDims.baseH);
+          const nextSize = computeWindowSize(nextRotation, scaleRef.current, baseDims.baseW, baseDims.baseH);
+          const win = getCurrentWindow();
+          const pos = await win.outerPosition();
+          const dpr = window.devicePixelRatio || 1;
+          // 物理 delta = 逻辑 delta × DPR，保持窗口中心不动
+          const deltaX = Math.round(((oldSize.width - nextSize.width) / 2) * dpr);
+          const deltaY = Math.round(((oldSize.height - nextSize.height) / 2) * dpr);
+          await win.setSize(new LogicalSize(nextSize.width, nextSize.height));
+          await win.setPosition(new PhysicalPosition(pos.x + deltaX, pos.y + deltaY));
+        }
+      }
+
+      await updateTransform({ rotation: nextRotation }, { rotation: nextRotation });
+    },
+    [pin, updateTransform]
   );
 
   // ===== 右键菜单回调 =====
@@ -170,8 +248,8 @@ export function PinWindow({ pinId }: PinWindowProps) {
   const handleRotate90 = useCallback(() => {
     if (!pin) return;
     const newRotation = (pin.rotation + 90) % 360;
-    updateTransform({ rotation: newRotation }, { rotation: newRotation });
-  }, [pin, updateTransform]);
+    applyRotation(newRotation);
+  }, [pin, applyRotation]);
 
   const handleCopy = useCallback(async () => {
     if (!absImagePathRef.current) return;
@@ -370,13 +448,13 @@ export function PinWindow({ pinId }: PinWindowProps) {
         case "[": {
           e.preventDefault();
           const newRotation = (pin.rotation - 90 + 360) % 360;
-          updateTransform({ rotation: newRotation }, { rotation: newRotation });
+          applyRotation(newRotation);
           break;
         }
         case "]": {
           e.preventDefault();
           const newRotation = (pin.rotation + 90) % 360;
-          updateTransform({ rotation: newRotation }, { rotation: newRotation });
+          applyRotation(newRotation);
           break;
         }
         case "c":
@@ -397,12 +475,14 @@ export function PinWindow({ pinId }: PinWindowProps) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [pin, updateTransform, applyScale, handleCopy, handleHide]);
+  }, [pin, updateTransform, applyScale, applyRotation, handleCopy, handleHide]);
 
-  if (!pin || !imageUrl) return null;
+  if (!pin || !imageUrl || !baseDims) return null;
 
-  // CSS 视觉层负责翻转和旋转；缩放交给窗口尺寸，避免图片超出视口后被裁切。
+  // CSS 视觉层负责翻转和旋转；visualLayer 尺寸始终为未旋转的基准×缩放，窗口尺寸负责交换
   const transform = `scale(${pin.flip_h ? -1 : 1}, ${pin.flip_v ? -1 : 1}) rotate(${pin.rotation}deg)`;
+  const visualWidth = baseDims.baseW * pin.scale;
+  const visualHeight = baseDims.baseH * pin.scale;
 
   return (
     <div
@@ -412,7 +492,10 @@ export function PinWindow({ pinId }: PinWindowProps) {
       onWheel={handleWheel}
       onDoubleClick={handleDoubleClick}
     >
-      <div className={styles.visualLayer} style={{ transform, opacity: pin.opacity }}>
+      <div
+        className={styles.visualLayer}
+        style={{ transform, opacity: pin.opacity, width: visualWidth, height: visualHeight }}
+      >
         <img src={imageUrl} className={styles.pinImage} draggable={false} />
       </div>
     </div>

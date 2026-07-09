@@ -13,6 +13,8 @@ export interface PinRecord {
   hidden: boolean;
   flip_h: boolean;
   flip_v: boolean;
+  base_width: number | null;
+  base_height: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -37,6 +39,13 @@ export interface MonitorInfo {
 
 export interface ClipboardImageEvent {
   path: string;
+  width: number;
+  height: number;
+}
+
+export interface PinRect {
+  x: number;
+  y: number;
   width: number;
   height: number;
 }
