@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, Row};
 
 use crate::error::{AppError, Result};
 use crate::models::pin::PinRecord;
@@ -12,6 +12,34 @@ fn now_timestamp() -> i64 {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }
+
+/// 从数据库行解析 PinRecord，统一字段映射避免重复代码
+fn row_to_pin(row: &Row) -> rusqlite::Result<PinRecord> {
+    Ok(PinRecord {
+        id: row.get(0)?,
+        file_path: row.get(1)?,
+        thumb_path: row.get(2)?,
+        pos_x: row.get(3)?,
+        pos_y: row.get(4)?,
+        scale: row.get(5)?,
+        rotation: row.get(6)?,
+        opacity: row.get(7)?,
+        always_on_top: row.get::<_, i32>(8)? != 0,
+        locked: row.get::<_, i32>(9)? != 0,
+        pinned_open: row.get::<_, i32>(10)? != 0,
+        hidden: row.get::<_, i32>(11)? != 0,
+        flip_h: row.get::<_, i32>(12)? != 0,
+        flip_v: row.get::<_, i32>(13)? != 0,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
+    })
+}
+
+/// 所有贴图字段的 SELECT 片段，保证 row_to_pin 索引一致
+const PIN_COLUMNS: &str =
+    "id, file_path, thumb_path, pos_x, pos_y, scale, rotation, \
+     opacity, always_on_top, locked, pinned_open, hidden, flip_h, flip_v, \
+     created_at, updated_at";
 
 pub fn get_config(conn: &Connection, key: &str) -> Result<Option<String>> {
     let mut stmt = conn.prepare("SELECT value FROM config WHERE key = ?1")?;
@@ -34,8 +62,9 @@ pub fn insert_pin(conn: &Connection, pin: &PinRecord) -> Result<()> {
     conn.execute(
         r#"INSERT INTO pins
            (id, file_path, thumb_path, pos_x, pos_y, scale, rotation,
-            opacity, always_on_top, locked, pinned_open, created_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"#,
+            opacity, always_on_top, locked, pinned_open, hidden, flip_h, flip_v,
+            created_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"#,
         params![
             pin.id,
             pin.file_path,
@@ -48,6 +77,9 @@ pub fn insert_pin(conn: &Connection, pin: &PinRecord) -> Result<()> {
             pin.always_on_top as i32,
             pin.locked as i32,
             pin.pinned_open as i32,
+            pin.hidden as i32,
+            pin.flip_h as i32,
+            pin.flip_v as i32,
             pin.created_at,
             pin.updated_at,
         ],
@@ -56,29 +88,10 @@ pub fn insert_pin(conn: &Connection, pin: &PinRecord) -> Result<()> {
 }
 
 pub fn get_pin_by_id(conn: &Connection, id: &str) -> Result<PinRecord> {
-    let mut stmt = conn.prepare(
-        r#"SELECT id, file_path, thumb_path, pos_x, pos_y, scale, rotation,
-                  opacity, always_on_top, locked, pinned_open, created_at, updated_at
-           FROM pins WHERE id = ?1"#,
-    )?;
+    let sql = format!("SELECT {} FROM pins WHERE id = ?1", PIN_COLUMNS);
+    let mut stmt = conn.prepare(&sql)?;
     let pin = stmt
-        .query_row(params![id], |row| {
-            Ok(PinRecord {
-                id: row.get(0)?,
-                file_path: row.get(1)?,
-                thumb_path: row.get(2)?,
-                pos_x: row.get(3)?,
-                pos_y: row.get(4)?,
-                scale: row.get(5)?,
-                rotation: row.get(6)?,
-                opacity: row.get(7)?,
-                always_on_top: row.get::<_, i32>(8)? != 0,
-                locked: row.get::<_, i32>(9)? != 0,
-                pinned_open: row.get::<_, i32>(10)? != 0,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
-            })
-        })
+        .query_row(params![id], row_to_pin)
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => AppError::PinNotFound(id.to_string()),
             other => AppError::Database(other),
@@ -86,34 +99,46 @@ pub fn get_pin_by_id(conn: &Connection, id: &str) -> Result<PinRecord> {
     Ok(pin)
 }
 
+/// 获取所有 pinned_open=1 的贴图（含隐藏状态），按创建时间排序
 pub fn get_open_pins(conn: &Connection) -> Result<Vec<PinRecord>> {
-    let mut stmt = conn.prepare(
-        r#"SELECT id, file_path, thumb_path, pos_x, pos_y, scale, rotation,
-                  opacity, always_on_top, locked, pinned_open, created_at, updated_at
-           FROM pins WHERE pinned_open = 1 ORDER BY created_at"#,
-    )?;
+    let sql = format!(
+        "SELECT {} FROM pins WHERE pinned_open = 1 ORDER BY created_at",
+        PIN_COLUMNS
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let pins = stmt
-        .query_map([], |row| {
-            Ok(PinRecord {
-                id: row.get(0)?,
-                file_path: row.get(1)?,
-                thumb_path: row.get(2)?,
-                pos_x: row.get(3)?,
-                pos_y: row.get(4)?,
-                scale: row.get(5)?,
-                rotation: row.get(6)?,
-                opacity: row.get(7)?,
-                always_on_top: row.get::<_, i32>(8)? != 0,
-                locked: row.get::<_, i32>(9)? != 0,
-                pinned_open: row.get::<_, i32>(10)? != 0,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
-            })
-        })?
+        .query_map([], row_to_pin)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(pins)
 }
 
+/// 获取所有贴图记录（含已关闭），按创建时间倒序，用于贴图管理面板
+pub fn get_all_pins(conn: &Connection) -> Result<Vec<PinRecord>> {
+    let sql = format!(
+        "SELECT {} FROM pins ORDER BY created_at DESC",
+        PIN_COLUMNS
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let pins = stmt
+        .query_map([], row_to_pin)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(pins)
+}
+
+/// 获取可恢复的贴图：pinned_open=1 且未隐藏，用于应用启动时重开窗口
+pub fn get_restorable_pins(conn: &Connection) -> Result<Vec<PinRecord>> {
+    let sql = format!(
+        "SELECT {} FROM pins WHERE pinned_open = 1 AND hidden = 0 ORDER BY created_at",
+        PIN_COLUMNS
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let pins = stmt
+        .query_map([], row_to_pin)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(pins)
+}
+
+/// 动态更新贴图字段：仅更新传入的字段，未传字段保持原值
 pub fn update_pin_transform(
     conn: &Connection,
     id: &str,
@@ -122,6 +147,10 @@ pub fn update_pin_transform(
     scale: Option<f64>,
     rotation: Option<f64>,
     opacity: Option<f64>,
+    always_on_top: Option<bool>,
+    locked: Option<bool>,
+    flip_h: Option<bool>,
+    flip_v: Option<bool>,
 ) -> Result<()> {
     let now = now_timestamp();
     let mut sets: Vec<&str> = Vec::new();
@@ -147,6 +176,22 @@ pub fn update_pin_transform(
         sets.push("opacity = ?");
         params_vec.push(Box::new(opacity));
     }
+    if let Some(v) = always_on_top {
+        sets.push("always_on_top = ?");
+        params_vec.push(Box::new(v as i32));
+    }
+    if let Some(v) = locked {
+        sets.push("locked = ?");
+        params_vec.push(Box::new(v as i32));
+    }
+    if let Some(v) = flip_h {
+        sets.push("flip_h = ?");
+        params_vec.push(Box::new(v as i32));
+    }
+    if let Some(v) = flip_v {
+        sets.push("flip_v = ?");
+        params_vec.push(Box::new(v as i32));
+    }
 
     sets.push("updated_at = ?");
     params_vec.push(Box::new(now));
@@ -159,12 +204,39 @@ pub fn update_pin_transform(
     Ok(())
 }
 
+/// 标记贴图为已关闭（pinned_open=0）
 pub fn close_pin(conn: &Connection, id: &str) -> Result<()> {
     let now = now_timestamp();
     conn.execute(
         "UPDATE pins SET pinned_open = 0, updated_at = ?1 WHERE id = ?2",
         params![now, id],
     )?;
+    Ok(())
+}
+
+/// 设置贴图隐藏状态：hidden=1 隐藏，hidden=0 恢复显示
+pub fn set_pin_hidden(conn: &Connection, id: &str, hidden: bool) -> Result<()> {
+    let now = now_timestamp();
+    conn.execute(
+        "UPDATE pins SET hidden = ?1, updated_at = ?2 WHERE id = ?3",
+        params![hidden as i32, now, id],
+    )?;
+    Ok(())
+}
+
+/// 恢复贴图显示：关闭状态的贴图也需要重新标记为打开，列表面板才能一键恢复窗口
+pub fn show_pin(conn: &Connection, id: &str) -> Result<()> {
+    let now = now_timestamp();
+    conn.execute(
+        "UPDATE pins SET pinned_open = 1, hidden = 0, updated_at = ?1 WHERE id = ?2",
+        params![now, id],
+    )?;
+    Ok(())
+}
+
+/// 永久删除贴图记录（仅删 DB 行，文件由调用方负责清理）
+pub fn delete_pin(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute("DELETE FROM pins WHERE id = ?1", params![id])?;
     Ok(())
 }
 
@@ -212,4 +284,45 @@ pub fn get_screenshot_history(conn: &Connection, limit: u32) -> Result<Vec<Scree
 pub fn clear_screenshot_history(conn: &Connection) -> Result<()> {
     conn.execute("DELETE FROM screenshot_history", [])?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::migrations::run_migrations;
+
+    fn sample_pin() -> PinRecord {
+        PinRecord {
+            id: "pin-test".to_string(),
+            file_path: "pins/pin-test.png".to_string(),
+            thumb_path: None,
+            pos_x: None,
+            pos_y: None,
+            scale: 1.0,
+            rotation: 0.0,
+            opacity: 1.0,
+            always_on_top: true,
+            locked: false,
+            pinned_open: true,
+            hidden: false,
+            flip_h: false,
+            flip_v: false,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    #[test]
+    fn show_pin_reopens_closed_pin_as_visible() {
+        let conn = Connection::open_in_memory().expect("open in-memory database");
+        run_migrations(&conn).expect("run migrations");
+        insert_pin(&conn, &sample_pin()).expect("insert pin");
+        close_pin(&conn, "pin-test").expect("close pin");
+
+        show_pin(&conn, "pin-test").expect("show pin");
+
+        let pin = get_pin_by_id(&conn, "pin-test").expect("load pin");
+        assert!(pin.pinned_open);
+        assert!(!pin.hidden);
+    }
 }

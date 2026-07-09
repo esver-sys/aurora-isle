@@ -1,13 +1,14 @@
 import { motion } from "framer-motion";
-import { Camera, Settings } from "lucide-react";
+import { Camera, Settings, Pin } from "lucide-react";
 import styles from "./Island.module.css";
 
 interface ExpandedProps {
   onScreenshot: () => void;
   onSettings: () => void;
+  onPinList: () => void;
 }
 
-export function Expanded({ onScreenshot, onSettings }: ExpandedProps) {
+export function Expanded({ onScreenshot, onSettings, onPinList }: ExpandedProps) {
   return (
     <motion.div
       className={styles.expandedContent}
@@ -23,6 +24,14 @@ export function Expanded({ onScreenshot, onSettings }: ExpandedProps) {
         onPointerDown={(e) => e.stopPropagation()}
       >
         <Camera size={18} color="white" />
+      </button>
+      <button
+        className={styles.iconBtn}
+        title="贴图管理"
+        onClick={onPinList}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <Pin size={18} color="white" />
       </button>
       <button
         className={styles.iconBtn}

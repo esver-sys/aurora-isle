@@ -51,6 +51,12 @@ pub fn run() {
 
             app.manage(AppState::new(connection, app_data_dir));
 
+            // 应用启动时恢复上次未关闭的贴图窗口（pinned_open=1 且 hidden=0）
+            let state = app.state::<AppState>();
+            if let Err(e) = pin::restore_pins_on_startup(app.handle(), state.inner()) {
+                tracing::warn!("Failed to restore pins on startup: {}", e);
+            }
+
             tracing::info!("Aurora Isle initialized successfully");
             Ok(())
         })
@@ -61,8 +67,12 @@ pub fn run() {
             island::get_monitor_info,
             pin::pin_image,
             pin::unpin_image,
+            pin::hide_pin,
+            pin::show_pin,
+            pin::delete_pin,
             pin::update_pin_transform,
             pin::get_open_pins,
+            pin::get_all_pins,
             pin::get_pin_by_id,
             pin::get_image_path,
             config::get_config,

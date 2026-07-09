@@ -10,6 +10,9 @@ export interface PinRecord {
   always_on_top: boolean;
   locked: boolean;
   pinned_open: boolean;
+  hidden: boolean;
+  flip_h: boolean;
+  flip_v: boolean;
   created_at: number;
   updated_at: number;
 }
@@ -20,6 +23,10 @@ export interface PinTransform {
   scale?: number;
   rotation?: number;
   opacity?: number;
+  always_on_top?: boolean;
+  locked?: boolean;
+  flip_h?: boolean;
+  flip_v?: boolean;
 }
 
 export interface MonitorInfo {

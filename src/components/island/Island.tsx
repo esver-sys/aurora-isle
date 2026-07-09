@@ -6,7 +6,7 @@ import { useIslandStore } from "../../stores/islandStore";
 import { useCursorEvents } from "../../hooks/useCursorEvents";
 import { useWindowDrag } from "../../hooks/useWindowDrag";
 import { useScreenshot } from "../../hooks/useScreenshot";
-import { openSettings } from "../../api/settings";
+import { openSettings, openSettingsTab } from "../../api/settings";
 import styles from "./Island.module.css";
 
 export function Island() {
@@ -39,6 +39,11 @@ export function Island() {
     openSettings();
   }, [setMode]);
 
+  const handlePinList = useCallback(() => {
+    setMode("pill");
+    openSettingsTab("pin");
+  }, [setMode]);
+
   return (
     <div className={styles.container}>
       <motion.div
@@ -57,6 +62,7 @@ export function Island() {
               key="expanded"
               onScreenshot={handleScreenshot}
               onSettings={handleSettings}
+              onPinList={handlePinList}
             />
           )}
         </AnimatePresence>

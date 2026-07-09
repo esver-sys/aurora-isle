@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
@@ -29,6 +29,43 @@ fn compute_pin_window_size(image_width: u32, image_height: u32) -> (f64, f64) {
     ((width * scale).round(), (height * scale).round())
 }
 
+/// 创建贴图窗口的通用辅助函数，供 pin_image / show_pin / restore_pins_on_startup 复用。
+/// 读取图片尺寸计算窗口大小，并根据 PinRecord 恢复位置和置顶状态。
+fn create_pin_window(app: &AppHandle, app_data_dir: &Path, pin: &PinRecord) -> Result<()> {
+    let label = format!("pin-{}", pin.id);
+    if let Some(window) = app.get_webview_window(&label) {
+        // 已存在窗口时直接聚焦，避免列表重复点击“显示”导致重复 label 创建失败。
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let abs_image_path = app_data_dir.join(&pin.file_path);
+    let (image_width, image_height) = image::image_dimensions(&abs_image_path)?;
+    let (base_w, base_h) = compute_pin_window_size(image_width, image_height);
+    let scale = pin.scale.clamp(0.1, 5.0);
+    let (win_w, win_h) = ((base_w * scale).round(), (base_h * scale).round());
+
+    let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
+        .title("Pin")
+        .transparent(true)
+        .decorations(false)
+        .always_on_top(pin.always_on_top)
+        .skip_taskbar(true)
+        .resizable(true)
+        .inner_size(win_w, win_h);
+
+    // 若有保存的窗口位置则恢复，否则由系统决定默认位置
+    let builder = if let (Some(x), Some(y)) = (pin.pos_x, pin.pos_y) {
+        builder.position(x, y)
+    } else {
+        builder
+    };
+
+    builder.build()?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn pin_image(
     app: AppHandle,
@@ -40,8 +77,6 @@ pub async fn pin_image(
     let file_rel = services::storage::save_pin_image(&state.app_data_dir, &temp_path, &id)?;
 
     let abs_image_path = state.app_data_dir.join(&file_rel);
-    let (image_width, image_height) = image::image_dimensions(&abs_image_path)?;
-    let (pin_window_width, pin_window_height) = compute_pin_window_size(image_width, image_height);
     let thumb_rel = services::thumbnail::generate_thumbnail(
         &abs_image_path,
         &state.app_data_dir.join("thumbs"),
@@ -63,6 +98,9 @@ pub async fn pin_image(
         always_on_top: true,
         locked: false,
         pinned_open: true,
+        hidden: false,
+        flip_h: false,
+        flip_v: false,
         created_at: now,
         updated_at: now,
     };
@@ -72,16 +110,7 @@ pub async fn pin_image(
         db::repository::insert_pin(&conn, &pin)?;
     }
 
-    let label = format!("pin-{}", id);
-    WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
-        .title("Pin")
-        .transparent(true)
-        .decorations(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(true)
-        .inner_size(pin_window_width, pin_window_height)
-        .build()?;
+    create_pin_window(&app, &state.app_data_dir, &pin)?;
 
     Ok(id)
 }
@@ -96,6 +125,65 @@ pub async fn unpin_image(app: AppHandle, state: State<'_, AppState>, id: String)
     let label = format!("pin-{}", id);
     if let Some(window) = app.get_webview_window(&label) {
         let _ = window.close();
+    }
+
+    Ok(())
+}
+
+/// 隐藏贴图：标记 hidden=1 并关闭窗口，不删除数据，可从贴图列表面板恢复
+#[tauri::command]
+pub async fn hide_pin(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<()> {
+    {
+        let conn = state.db()?;
+        db::repository::set_pin_hidden(&conn, &id, true)?;
+    }
+
+    let label = format!("pin-{}", id);
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.close();
+    }
+
+    Ok(())
+}
+
+/// 显示已隐藏的贴图：标记 hidden=0 并重新创建窗口，恢复保存的位置和变换
+#[tauri::command]
+pub async fn show_pin(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<()> {
+    let pin = {
+        let conn = state.db()?;
+        db::repository::show_pin(&conn, &id)?;
+        db::repository::get_pin_by_id(&conn, &id)?
+    };
+
+    create_pin_window(&app, &state.app_data_dir, &pin)?;
+    Ok(())
+}
+
+/// 永久删除贴图：关闭窗口 + 删除图片/缩略图文件 + 删除 DB 记录
+#[tauri::command]
+pub async fn delete_pin(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<()> {
+    // 先关闭窗口
+    let label = format!("pin-{}", id);
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.close();
+    }
+
+    // 获取贴图记录以清理文件，然后删除 DB 行
+    let pin = {
+        let conn = state.db()?;
+        let pin = db::repository::get_pin_by_id(&conn, &id)?;
+        db::repository::delete_pin(&conn, &id)?;
+        pin
+    };
+
+    // 删除图片文件
+    let image_path = state.app_data_dir.join(&pin.file_path);
+    let _ = std::fs::remove_file(&image_path);
+
+    // 删除缩略图文件（若存在）
+    if let Some(thumb) = &pin.thumb_path {
+        let thumb_path = state.app_data_dir.join(thumb);
+        let _ = std::fs::remove_file(&thumb_path);
     }
 
     Ok(())
@@ -116,6 +204,10 @@ pub async fn update_pin_transform(
         transform.scale,
         transform.rotation,
         transform.opacity,
+        transform.always_on_top,
+        transform.locked,
+        transform.flip_h,
+        transform.flip_v,
     )?;
     Ok(())
 }
@@ -124,6 +216,13 @@ pub async fn update_pin_transform(
 pub async fn get_open_pins(state: State<'_, AppState>) -> Result<Vec<PinRecord>> {
     let conn = state.db()?;
     db::repository::get_open_pins(&conn)
+}
+
+/// 获取所有贴图记录（含已关闭），用于贴图管理面板
+#[tauri::command]
+pub async fn get_all_pins(state: State<'_, AppState>) -> Result<Vec<PinRecord>> {
+    let conn = state.db()?;
+    db::repository::get_all_pins(&conn)
 }
 
 #[tauri::command]
@@ -138,7 +237,24 @@ pub async fn get_image_path(state: State<'_, AppState>, file_rel: String) -> Res
     Ok(abs_path.to_string_lossy().to_string())
 }
 
-pub fn resolve_pin_path(state: &AppState, file_rel: &str) -> PathBuf {
+/// 应用启动时恢复可见贴图窗口：pinned_open=1 且 hidden=0 的记录
+pub fn restore_pins_on_startup(app: &AppHandle, state: &AppState) -> Result<()> {
+    let pins = {
+        let conn = state.db()?;
+        db::repository::get_restorable_pins(&conn)?
+    };
+
+    for pin in &pins {
+        if let Err(e) = create_pin_window(app, &state.app_data_dir, pin) {
+            tracing::warn!("Failed to restore pin {}: {}", pin.id, e);
+        }
+    }
+
+    tracing::info!("Restored {} pin(s) on startup", pins.len());
+    Ok(())
+}
+
+pub fn resolve_pin_path(state: &AppState, file_rel: &str) -> std::path::PathBuf {
     state.app_data_dir.join(file_rel)
 }
 
