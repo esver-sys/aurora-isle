@@ -72,6 +72,13 @@ pub fn run() {
             screenshot::capture_screen,
             screenshot::crop_image,
             screenshot::copy_image_to_clipboard,
+            screenshot::save_image_to_path,
+            screenshot::quick_save_image,
+            screenshot::get_window_at_point,
+            screenshot::save_image_bytes,
+            screenshot::add_screenshot_history,
+            screenshot::get_screenshot_history,
+            screenshot::clear_screenshot_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running aurora-isle");

@@ -24,6 +24,17 @@ const SCHEMA_V1: &str = r#"
         updated_at    INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS screenshot_history (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        region_x      REAL NOT NULL,
+        region_y      REAL NOT NULL,
+        region_width  REAL NOT NULL,
+        region_height REAL NOT NULL,
+        scale_factor  REAL NOT NULL,
+        file_path     TEXT,
+        created_at    INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS schema_version (
         version INTEGER PRIMARY KEY
     );

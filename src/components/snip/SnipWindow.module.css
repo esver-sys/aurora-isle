@@ -26,6 +26,15 @@
   pointer-events: none;
 }
 
+.windowHighlight {
+  position: absolute;
+  border: 2px solid rgba(0, 230, 118, 0.85);
+  background: rgba(0, 230, 118, 0.06);
+  pointer-events: none;
+  z-index: 1;
+  transition: all 0.05s ease-out;
+}
+
 .selection {
   position: absolute;
   border: 2px solid rgba(0, 150, 255, 0.9);
@@ -37,6 +46,26 @@
   position: absolute;
   inset: 0;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3);
+}
+
+.sizeLabel {
+  position: absolute;
+  bottom: -26px;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  background: rgba(0, 150, 255, 0.95);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .hint {
@@ -97,6 +126,16 @@
   color: #6f7780;
   cursor: not-allowed;
   opacity: 0.52;
+}
+
+.toolBtnActive {
+  background: #0f5fb8;
+  color: #fff;
+}
+
+.toolBtnActive:hover {
+  background: #0f5fb8;
+  color: #fff;
 }
 
 .separator {

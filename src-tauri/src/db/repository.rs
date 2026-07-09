@@ -4,6 +4,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, Result};
 use crate::models::pin::PinRecord;
+use crate::models::screenshot::ScreenshotHistoryEntry;
 
 fn now_timestamp() -> i64 {
     SystemTime::now()
@@ -164,5 +165,51 @@ pub fn close_pin(conn: &Connection, id: &str) -> Result<()> {
         "UPDATE pins SET pinned_open = 0, updated_at = ?1 WHERE id = ?2",
         params![now, id],
     )?;
+    Ok(())
+}
+
+pub fn insert_screenshot_history(
+    conn: &Connection,
+    region_x: f64,
+    region_y: f64,
+    region_width: f64,
+    region_height: f64,
+    scale_factor: f64,
+    file_path: Option<&str>,
+) -> Result<()> {
+    let now = now_timestamp();
+    conn.execute(
+        r#"INSERT INTO screenshot_history
+           (region_x, region_y, region_width, region_height, scale_factor, file_path, created_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"#,
+        params![region_x, region_y, region_width, region_height, scale_factor, file_path, now],
+    )?;
+    Ok(())
+}
+
+pub fn get_screenshot_history(conn: &Connection, limit: u32) -> Result<Vec<ScreenshotHistoryEntry>> {
+    let mut stmt = conn.prepare(
+        r#"SELECT id, region_x, region_y, region_width, region_height, scale_factor, file_path, created_at
+           FROM screenshot_history ORDER BY created_at DESC LIMIT ?1"#,
+    )?;
+    let entries = stmt
+        .query_map(params![limit], |row| {
+            Ok(ScreenshotHistoryEntry {
+                id: row.get(0)?,
+                region_x: row.get(1)?,
+                region_y: row.get(2)?,
+                region_width: row.get(3)?,
+                region_height: row.get(4)?,
+                scale_factor: row.get(5)?,
+                file_path: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(entries)
+}
+
+pub fn clear_screenshot_history(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM screenshot_history", [])?;
     Ok(())
 }

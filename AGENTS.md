@@ -1,5 +1,13 @@
 # Aurora Isle - 开发指南
 
+## 执行规则
+
+- 读写文件必须使用 UTF-8，避免中文乱码。
+- 非必要不要修改文件换行符；项目默认使用 LF，保持最小修改。
+- 重点步骤和核心逻辑需要补充详细中文注释；简单逻辑或普通方法补充简短中文注释即可。
+- 需求修改和 BUG 修复不要跑全量测试，只验证对应测试文件或必要的最小检查。
+- 编码前必须先阅读 `CONTEXT.md`，遵循其中的 `dependency-first-development` 规则：先查依赖和现有封装，再决定是否新增实现或依赖。
+
 ## 项目概述
 
 Aurora Isle 是一个 Windows 桌面「灵动岛」应用，基于 Tauri v2 + Rust + React + TypeScript。
@@ -64,6 +72,7 @@ Aurora Isle 是一个 Windows 桌面「灵动岛」应用，基于 Tauri v2 + Ru
 
 ## 相关文档
 
+- `CONTEXT.md` — 依赖优先开发 skill / 项目编码前置规则
 - `docs/灵动岛-需求拆解与方案.md` — 原始需求
 - `docs/superpowers/specs/2026-07-07-aurora-isle-phase1-design.md` — Phase 1 设计
 - `docs/architecture.md` — 架构说明

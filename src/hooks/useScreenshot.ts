@@ -2,8 +2,17 @@ import { useCallback, useRef } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getAllWindows, currentMonitor } from "@tauri-apps/api/window";
 import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
-import { captureScreen, copyImageToClipboard } from "../api/screenshot";
+import { save } from "@tauri-apps/plugin-dialog";
+import { captureScreen, copyImageToClipboard, saveImageToPath, quickSaveImage, addScreenshotHistory } from "../api/screenshot";
 import { pinImage } from "../api/pin";
+
+interface HistoryInfo {
+  regionX: number;
+  regionY: number;
+  regionWidth: number;
+  regionHeight: number;
+  scaleFactor: number;
+}
 
 export function useScreenshot() {
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -26,11 +35,14 @@ export function useScreenshot() {
       const scaleFactor = monitor.scaleFactor;
       const logicalWidth = Math.round(monitor.size.width / scaleFactor);
       const logicalHeight = Math.round(monitor.size.height / scaleFactor);
+      const monitorPos = monitor.position;
+      const logicalX = monitorPos.x / scaleFactor;
+      const logicalY = monitorPos.y / scaleFactor;
 
-      const capturePromise = captureScreen();
+      const capturePromise = captureScreen(monitorPos.x, monitorPos.y);
 
       await snipWin.setSize(new LogicalSize(logicalWidth, logicalHeight));
-      await snipWin.setPosition(new LogicalPosition(0, 0));
+      await snipWin.setPosition(new LogicalPosition(logicalX, logicalY));
 
       let unlistenReady: (() => void) | undefined;
       let unlistenComplete: (() => void) | undefined;
@@ -51,9 +63,11 @@ export function useScreenshot() {
             width: result.width,
             height: result.height,
             scaleFactor: result.scale_factor,
+            monitorX: logicalX,
+            monitorY: logicalY,
           });
         }),
-        listen<{ action: "pin" | "copy"; croppedPath: string | null }>(
+        listen<{ action: "pin" | "copy" | "save" | "quick_save"; croppedPath: string | null; historyInfo: HistoryInfo | null }>(
           "snip:complete",
           async (event) => {
             cleanup();
@@ -61,10 +75,37 @@ export function useScreenshot() {
             await snipWin.hide();
             if (event.payload.croppedPath) {
               try {
-                if (event.payload.action === "pin") {
-                  await pinImage(event.payload.croppedPath);
-                } else {
-                  await copyImageToClipboard(event.payload.croppedPath);
+                const { action, croppedPath, historyInfo } = event.payload;
+                if (action === "pin") {
+                  await pinImage(croppedPath);
+                } else if (action === "copy") {
+                  await copyImageToClipboard(croppedPath);
+                } else if (action === "save") {
+                  const destPath = await save({
+                    defaultPath: `screenshot_${Date.now()}.png`,
+                    filters: [
+                      { name: "PNG", extensions: ["png"] },
+                      { name: "JPEG", extensions: ["jpg", "jpeg"] },
+                      { name: "WebP", extensions: ["webp"] },
+                      { name: "BMP", extensions: ["bmp"] },
+                    ],
+                  });
+                  if (destPath) {
+                    await saveImageToPath(croppedPath, destPath);
+                  }
+                } else if (action === "quick_save") {
+                  await quickSaveImage(croppedPath);
+                }
+
+                if (historyInfo) {
+                  await addScreenshotHistory(
+                    historyInfo.regionX,
+                    historyInfo.regionY,
+                    historyInfo.regionWidth,
+                    historyInfo.regionHeight,
+                    historyInfo.scaleFactor,
+                    croppedPath
+                  );
                 }
               } catch (e) {
                 console.error("Screenshot action failed:", e);
