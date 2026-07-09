@@ -81,7 +81,11 @@ export function PinWindow({ pinId }: PinWindowProps) {
   };
 
   return (
-    <div className={styles.container} onPointerDown={handlePointerDown}>
+    <div
+      className={styles.container}
+      onPointerDown={handlePointerDown}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <img
         src={imageUrl}
         className={styles.pinImage}

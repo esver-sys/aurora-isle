@@ -31,6 +31,7 @@ export function useScreenshot() {
         alwaysOnTop: true,
         skipTaskbar: true,
         resizable: false,
+        visible: false,
         width: logicalWidth,
         height: logicalHeight,
         x: 0,

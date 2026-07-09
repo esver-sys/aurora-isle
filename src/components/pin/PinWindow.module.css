@@ -19,7 +19,7 @@
 
 .toolbar {
   position: absolute;
-  bottom: -44px;
+  bottom: 8px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -32,6 +32,15 @@
   padding: 4px 8px;
   white-space: nowrap;
   cursor: default;
+  z-index: 10;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.container:hover .toolbar {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .toolBtn {
