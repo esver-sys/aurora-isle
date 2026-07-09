@@ -208,6 +208,16 @@ pub fn update_pin_transform(
     Ok(())
 }
 
+/// 异步生成缩略图后回填 thumb_path，返回是否命中仍然存在的贴图记录。
+pub fn update_pin_thumb_path(conn: &Connection, id: &str, thumb_path: &str) -> Result<bool> {
+    let now = now_timestamp();
+    let changed = conn.execute(
+        "UPDATE pins SET thumb_path = ?1, updated_at = ?2 WHERE id = ?3",
+        params![thumb_path, now, id],
+    )?;
+    Ok(changed > 0)
+}
+
 /// 标记贴图为已关闭（pinned_open=0）
 pub fn close_pin(conn: &Connection, id: &str) -> Result<()> {
     let now = now_timestamp();
@@ -330,5 +340,25 @@ mod tests {
         let pin = get_pin_by_id(&conn, "pin-test").expect("load pin");
         assert!(pin.pinned_open);
         assert!(!pin.hidden);
+    }
+
+    #[test]
+    fn update_pin_thumb_path_reports_existing_row_status() {
+        let conn = Connection::open_in_memory().expect("open in-memory database");
+        run_migrations(&conn).expect("run migrations");
+
+        assert!(
+            !update_pin_thumb_path(&conn, "missing", "thumbs/missing.png")
+                .expect("update missing pin thumb path")
+        );
+
+        insert_pin(&conn, &sample_pin()).expect("insert pin");
+
+        assert!(
+            update_pin_thumb_path(&conn, "pin-test", "thumbs/pin-test.png")
+                .expect("update existing pin thumb path")
+        );
+        let pin = get_pin_by_id(&conn, "pin-test").expect("load pin");
+        assert_eq!(pin.thumb_path, Some("thumbs/pin-test.png".to_string()));
     }
 }

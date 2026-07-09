@@ -1,6 +1,7 @@
 import { type PointerEvent, type WheelEvent, useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen, emit } from "@tauri-apps/api/event";
 import { LogicalPosition, LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
 import { Menu, type MenuOptions } from "@tauri-apps/api/menu";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -8,10 +9,6 @@ import { getPinById, getImagePath, unpinImage, hidePin, deletePin, updatePinTran
 import { copyImageToClipboard, saveImageToPath } from "../../api/screenshot";
 import type { PinRecord, PinTransform } from "../../types";
 import styles from "./PinWindow.module.css";
-
-interface PinWindowProps {
-  pinId: string;
-}
 
 const SCALE_MIN = 0.1;
 const SCALE_MAX = 5.0;
@@ -43,7 +40,9 @@ function computeWindowSize(
   return isQuarterTurn(rotation) ? { width: h, height: w } : { width: w, height: h };
 }
 
-export function PinWindow({ pinId }: PinWindowProps) {
+export function PinWindow() {
+  // pinId 由 Rust 端 emit 的 pin:activate 事件传入，窗口预创建时为 null
+  const [pinId, setPinId] = useState<string | null>(null);
   const [pin, setPin] = useState<PinRecord | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [baseDims, setBaseDims] = useState<{ baseW: number; baseH: number } | null>(null);
@@ -57,14 +56,32 @@ export function PinWindow({ pinId }: PinWindowProps) {
   // 缓存未旋转、未缩放的基准显示尺寸 { baseW, baseH }（逻辑像素），旋转/缩放都基于此计算
   const baseDimsRef = useRef<{ baseW: number; baseH: number } | null>(null);
 
+  // 监听 pin:activate 事件：Rust 端激活热备窗口时携带 pinId，触发加载贴图数据
   useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen<string>("pin:activate", (e) => {
+      setPinId(e.payload);
+    }).then((f) => {
+      unlisten = f;
+      // listener 就绪后通知 Rust，若 activate 事件在本窗口就绪前已发出则触发补发
+      emit("pin:ready", getCurrentWindow().label);
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pinId) return;
+    // 局部捕获，避免异步闭包内类型收窄丢失
+    const id = pinId;
     const win = getCurrentWindow();
     baseDimsRef.current = null;
     setBaseDims(null);
 
     (async () => {
       try {
-        const record = await getPinById(pinId);
+        const record = await getPinById(id);
         const absPath = await getImagePath(record.file_path);
         absImagePathRef.current = absPath;
 
@@ -106,7 +123,7 @@ export function PinWindow({ pinId }: PinWindowProps) {
     let unlisten: (() => void) | null = null;
     (async () => {
       unlisten = await win.onMoved(({ payload }) => {
-        updatePinTransform(pinId, { pos_x: payload.x, pos_y: payload.y }).catch((e) => {
+        updatePinTransform(id, { pos_x: payload.x, pos_y: payload.y }).catch((e) => {
           console.error("Failed to persist pin position:", e);
         });
       });

@@ -1,10 +1,13 @@
 use std::path::Path;
 
-use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl,
+    WebviewWindowBuilder,
+};
 
 use crate::commands::now_ts;
 use crate::db;
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::models::pin::{PinRecord, PinRect, PinTransform};
 use crate::services;
 use crate::state::AppState;
@@ -61,39 +64,132 @@ fn resolve_pin_base_size(pin: &PinRecord, image_width: u32, image_height: u32) -
     compute_pin_window_size(image_width, image_height)
 }
 
-/// 创建贴图窗口的通用辅助函数，供 pin_image / show_pin / restore_pins_on_startup 复用。
-/// 读取图片尺寸，通过 resolve_pin_base_size 解析基准尺寸，并根据旋转角度计算窗口大小。
-fn create_pin_window(app: &AppHandle, app_data_dir: &Path, pin: &PinRecord) -> Result<()> {
-    let label = format!("pin-{}", pin.id);
-    if let Some(window) = app.get_webview_window(&label) {
-        let _ = window.show();
-        let _ = window.set_focus();
-        return Ok(());
-    }
+/// 激活已存在的热备窗口显示指定贴图：设置尺寸/位置/置顶，show 后 emit 通知前端加载 pin 数据。
+/// 窗口需已预创建（visible:false），此函数只做显示前的配置，不新建窗口，因此极快。
+fn activate_pin_window(
+    app: &AppHandle,
+    app_data_dir: &Path,
+    pin: &PinRecord,
+    label: &str,
+) -> Result<()> {
+    let window = app
+        .get_webview_window(label)
+        .ok_or_else(|| AppError::General(format!("pin window {} not found", label)))?;
 
     let abs_image_path = app_data_dir.join(&pin.file_path);
-    let (image_width, image_height) = image::image_dimensions(&abs_image_path)?;
-    let (base_w, base_h) = resolve_pin_base_size(pin, image_width, image_height);
+    // 仅当 DB 未持久化基准尺寸时才读取图片尺寸，避免每次激活都解码图片头
+    let (base_w, base_h) = if pin.base_width.is_some() && pin.base_height.is_some() {
+        resolve_pin_base_size(pin, 0, 0)
+    } else {
+        let (image_width, image_height) = image::image_dimensions(&abs_image_path)?;
+        resolve_pin_base_size(pin, image_width, image_height)
+    };
     let scale = pin.scale.clamp(0.1, 5.0);
     let (win_w, win_h) = compute_pin_window_size_for_transform(base_w, base_h, scale, pin.rotation);
 
-    let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
+    // 先配置尺寸和位置再 show，避免窗口闪现旧尺寸
+    window.set_size(LogicalSize::new(win_w, win_h))?;
+    if let (Some(x), Some(y)) = (pin.pos_x, pin.pos_y) {
+        window.set_position(LogicalPosition::new(x, y))?;
+    }
+    window.set_always_on_top(pin.always_on_top)?;
+    window.show()?;
+    window.set_focus()?;
+
+    // 通知前端加载该 pin 的数据并渲染
+    app.emit_to(label, "pin:activate", &pin.id)?;
+    Ok(())
+}
+
+/// 同步构建一个隐藏的贴图窗口（visible:false），用作热备或兜底创建。
+fn build_pin_window_sync(app: &AppHandle, label: &str) -> Result<()> {
+    WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
         .title("Pin")
         .transparent(true)
         .decorations(false)
-        .always_on_top(pin.always_on_top)
+        .always_on_top(true)
         .skip_taskbar(true)
         .resizable(true)
-        .inner_size(win_w, win_h);
-
-    let builder = if let (Some(x), Some(y)) = (pin.pos_x, pin.pos_y) {
-        builder.position(x, y)
-    } else {
-        builder
-    };
-
-    builder.build()?;
+        .visible(false)
+        .inner_size(160.0, 160.0)
+        .build()?;
     Ok(())
+}
+
+/// 确保指定 label 的热备窗口存在；若并发路径已创建该窗口则直接复用。
+fn build_staging_window(app: &AppHandle, label: &str) {
+    if app.get_webview_window(label).is_some() {
+        return;
+    }
+    if let Err(e) = build_pin_window_sync(app, label) {
+        tracing::warn!("Failed to build staging window {}: {}", label, e);
+        return;
+    }
+}
+
+/// 取当前热备窗口 label，激活显示指定贴图，并同步补充下一个热备窗口。
+/// 统一入口，供 pin_image / show_pin / restore 复用。
+fn activate_and_replenish(app: &AppHandle, state: &AppState, pin: &PinRecord) -> Result<String> {
+    if let Some(label) = state.pin_pool.label_for_pin(&pin.id) {
+        if app.get_webview_window(&label).is_some() {
+            activate_pin_window(app, &state.app_data_dir, pin, &label)?;
+            return Ok(label);
+        }
+        // 映射存在但窗口已不存在（例如窗口被系统关闭），清理后重新分配热备窗口。
+        state.pin_pool.remove_pin_label(&pin.id);
+    }
+
+    let label = state.pin_pool.reserve_staging_label();
+    // 兜底：若热备窗口意外不存在（如被手动关闭），同步重建当前 label
+    if app.get_webview_window(&label).is_none() {
+        build_pin_window_sync(app, &label)?;
+    }
+    state.pin_pool.assign_pin_label(&pin.id, &label);
+
+    // 先激活显示贴图（用户立即看到结果），再同步补充下一个热备
+    if let Err(e) = activate_pin_window(app, &state.app_data_dir, pin, &label) {
+        state.pin_pool.remove_pin_label(&pin.id);
+        return Err(e);
+    }
+    let next_label = state.pin_pool.current_staging_label();
+    build_staging_window(app, &next_label);
+    Ok(label)
+}
+
+/// 后台线程生成缩略图并回填 DB，避免阻塞贴图窗口创建
+fn spawn_thumbnail(app: &AppHandle, app_data_dir: &Path, id: &str, abs_image_path: &Path) {
+    let app = app.clone();
+    let app_data_dir = app_data_dir.to_path_buf();
+    let id = id.to_string();
+    let abs_image_path = abs_image_path.to_path_buf();
+
+    std::thread::spawn(move || {
+        match services::thumbnail::generate_thumbnail(
+            &abs_image_path,
+            &app_data_dir.join("thumbs"),
+            &id,
+            256,
+        ) {
+            Ok(thumb_rel) => {
+                if let Some(state) = app.try_state::<AppState>() {
+                    if let Ok(conn) = state.db() {
+                        match db::repository::update_pin_thumb_path(&conn, &id, &thumb_rel) {
+                            Ok(true) => {}
+                            Ok(false) => {
+                                // 贴图可能在缩略图后台生成期间已被删除；此时 DB 无记录可回填，
+                                // 需要删除刚生成的文件，避免 thumbs 目录留下孤儿文件。
+                                let _ = std::fs::remove_file(app_data_dir.join(&thumb_rel));
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to update pin thumb_path {}: {}", id, e);
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => tracing::warn!("Failed to generate thumbnail for pin {}: {}", id, e),
+        }
+    });
 }
 
 #[tauri::command]
@@ -108,13 +204,6 @@ pub async fn pin_image(
     let file_rel = services::storage::save_pin_image(&state.app_data_dir, &temp_path, &id)?;
 
     let abs_image_path = state.app_data_dir.join(&file_rel);
-    let thumb_rel = services::thumbnail::generate_thumbnail(
-        &abs_image_path,
-        &state.app_data_dir.join("thumbs"),
-        &id,
-        256,
-    )
-    .ok();
 
     // 解析截图贴图的位置和基准尺寸：有 pin_rect 时使用选区坐标和尺寸，否则为 None 走默认逻辑
     let (pos_x, pos_y, base_width, base_height) = if let Some(ref rect) = pin_rect {
@@ -146,7 +235,7 @@ pub async fn pin_image(
     let pin = PinRecord {
         id: id.clone(),
         file_path: file_rel,
-        thumb_path: thumb_rel,
+        thumb_path: None,
         pos_x,
         pos_y,
         scale: 1.0,
@@ -169,7 +258,11 @@ pub async fn pin_image(
         db::repository::insert_pin(&conn, &pin)?;
     }
 
-    create_pin_window(&app, &state.app_data_dir, &pin)?;
+    // 激活热备窗口显示该贴图，并同步补充下一个热备窗口
+    activate_and_replenish(&app, &state, &pin)?;
+
+    // 缩略图仅供贴图管理面板使用，不阻塞贴图窗口显示；放后台线程生成后回填 DB
+    spawn_thumbnail(&app, &state.app_data_dir, &id, &abs_image_path);
 
     Ok(id)
 }
@@ -181,9 +274,12 @@ pub async fn unpin_image(app: AppHandle, state: State<'_, AppState>, id: String)
         db::repository::close_pin(&conn, &id)?;
     }
 
-    let label = format!("pin-{}", id);
-    if let Some(window) = app.get_webview_window(&label) {
-        let _ = window.close();
+    // 通过池映射定位窗口 label 并关闭
+    let label = state.pin_pool.remove_pin_label(&id);
+    if let Some(label) = label {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.close();
+        }
     }
 
     Ok(())
@@ -197,15 +293,18 @@ pub async fn hide_pin(app: AppHandle, state: State<'_, AppState>, id: String) ->
         db::repository::set_pin_hidden(&conn, &id, true)?;
     }
 
-    let label = format!("pin-{}", id);
-    if let Some(window) = app.get_webview_window(&label) {
-        let _ = window.close();
+    // 通过池映射定位窗口 label 并关闭（释放资源；show_pin 时重新分配窗口）
+    let label = state.pin_pool.remove_pin_label(&id);
+    if let Some(label) = label {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.close();
+        }
     }
 
     Ok(())
 }
 
-/// 显示已隐藏的贴图：标记 hidden=0 并重新创建窗口，恢复保存的位置和变换
+/// 显示已隐藏的贴图：标记 hidden=0 并重新分配窗口激活，恢复保存的位置和变换
 #[tauri::command]
 pub async fn show_pin(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<()> {
     let pin = {
@@ -214,17 +313,20 @@ pub async fn show_pin(app: AppHandle, state: State<'_, AppState>, id: String) ->
         db::repository::get_pin_by_id(&conn, &id)?
     };
 
-    create_pin_window(&app, &state.app_data_dir, &pin)?;
+    // 冷路径：分配新窗口并激活
+    activate_and_replenish(&app, &state, &pin)?;
     Ok(())
 }
 
 /// 永久删除贴图：关闭窗口 + 删除图片/缩略图文件 + 删除 DB 记录
 #[tauri::command]
 pub async fn delete_pin(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<()> {
-    // 先关闭窗口
-    let label = format!("pin-{}", id);
-    if let Some(window) = app.get_webview_window(&label) {
-        let _ = window.close();
+    // 先通过池映射定位并关闭窗口
+    let label = state.pin_pool.remove_pin_label(&id);
+    if let Some(label) = label {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.close();
+        }
     }
 
     // 获取贴图记录以清理文件，然后删除 DB 行
@@ -296,7 +398,8 @@ pub async fn get_image_path(state: State<'_, AppState>, file_rel: String) -> Res
     Ok(abs_path.to_string_lossy().to_string())
 }
 
-/// 应用启动时恢复可见贴图窗口：pinned_open=1 且 hidden=0 的记录
+/// 应用启动时恢复可见贴图窗口：pinned_open=1 且 hidden=0 的记录。
+/// 冷路径：为每个贴图分配窗口并激活。
 pub fn restore_pins_on_startup(app: &AppHandle, state: &AppState) -> Result<()> {
     let pins = {
         let conn = state.db()?;
@@ -304,7 +407,7 @@ pub fn restore_pins_on_startup(app: &AppHandle, state: &AppState) -> Result<()> 
     };
 
     for pin in &pins {
-        if let Err(e) = create_pin_window(app, &state.app_data_dir, pin) {
+        if let Err(e) = activate_and_replenish(app, state, pin) {
             tracing::warn!("Failed to restore pin {}: {}", pin.id, e);
         }
     }

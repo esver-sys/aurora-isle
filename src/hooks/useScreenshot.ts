@@ -76,7 +76,8 @@ export function useScreenshot() {
         }>("snip:complete", async (event) => {
           cleanup();
           cleanupRef.current = null;
-          await snipWin.hide();
+          // 截图窗口隐藏不阻塞后续贴图/复制操作，避免串行等待窗口 IPC
+          snipWin.hide().catch((e) => console.error("Failed to hide snip window:", e));
           if (event.payload.croppedPath) {
             try {
               const { action, croppedPath, historyInfo, pinRect } = event.payload;
@@ -102,14 +103,15 @@ export function useScreenshot() {
                 }
 
                 if (historyInfo) {
-                  await addScreenshotHistory(
+                  // 历史记录仅用于重复选区，纯 DB 写入，不阻塞用户操作
+                  addScreenshotHistory(
                     historyInfo.regionX,
                     historyInfo.regionY,
                     historyInfo.regionWidth,
                     historyInfo.regionHeight,
                     historyInfo.scaleFactor,
                     croppedPath
-                  );
+                  ).catch((e) => console.error("Failed to add screenshot history:", e));
                 }
               } catch (e) {
                 console.error("Screenshot action failed:", e);

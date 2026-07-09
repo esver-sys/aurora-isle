@@ -7,7 +7,7 @@ mod state;
 
 use commands::{config, island, pin, screenshot, system};
 use state::AppState;
-use tauri::Manager;
+use tauri::{Emitter, Listener, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -50,6 +50,21 @@ pub fn run() {
             let connection = services::database::init_database(&db_path)?;
 
             app.manage(AppState::new(connection, app_data_dir));
+
+            // 监听前端 pin:ready：贴图窗口 React 初始化完成、listener 注册后通知。
+            // 若该窗口已被分配 pinId 但 activate 事件在前端就绪前发出（丢失），此处补发。
+            let handle = app.handle().clone();
+            app.listen("pin:ready", move |event| {
+                let label: String = match serde_json::from_str(event.payload()) {
+                    Ok(s) => s,
+                    Err(_) => return,
+                };
+                let state = handle.state::<AppState>();
+                let pin_id = state.pin_pool.pin_for_label(&label);
+                if let Some(pin_id) = pin_id {
+                    let _ = handle.emit_to(&label, "pin:activate", &pin_id);
+                }
+            });
 
             // 应用启动时恢复上次未关闭的贴图窗口（pinned_open=1 且 hidden=0）
             let state = app.state::<AppState>();

@@ -48,6 +48,20 @@
         "shadow": false,
         "width": 1920,
         "height": 1080
+      },
+      {
+        "label": "pin-0",
+        "url": "index.html",
+        "title": "Pin",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": true,
+        "visible": false,
+        "shadow": false,
+        "width": 160,
+        "height": 160
       }
     ],
     "security": {

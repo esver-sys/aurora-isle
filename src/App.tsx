@@ -8,8 +8,8 @@ function App() {
   const label = getCurrentWindow().label;
 
   if (label.startsWith("pin-")) {
-    const pinId = label.slice(4);
-    return <PinWindow pinId={pinId} />;
+    // pinId 由 PinWindow 监听 pin:activate 事件获取，不再从 label 解析
+    return <PinWindow />;
   }
 
   if (label === "snip") {
