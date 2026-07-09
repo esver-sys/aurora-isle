@@ -109,25 +109,38 @@ export function SnipWindow() {
 
   useEffect(() => {
     const win = getCurrentWindow();
-    win.show();
-    win.setAlwaysOnTop(true);
-    win.setFocus();
-
-    let unlisten: (() => void) | null = null;
+    let unlistenCapture: (() => void) | null = null;
+    let unlistenStart: (() => void) | null = null;
 
     const setup = async () => {
-      unlisten = await listen<CaptureData>("snip:capture", (event) => {
+      unlistenCapture = await listen<CaptureData>("snip:capture", (event) => {
         const data = event.payload;
         dragRef.current.capture = data;
         setCapture(data);
         setBgUrl(convertFileSrc(data.tempPath));
       });
-      await emit("snip:ready", {});
+
+      unlistenStart = await listen("snip:start", async () => {
+        setCapture(null);
+        setBgUrl(null);
+        setMode("selecting");
+        setIsDragging(false);
+        setStart(null);
+        setEnd(null);
+        setMessage("拖拽选择区域 · ESC 取消");
+
+        await win.show();
+        await win.setAlwaysOnTop(true);
+        await win.setFocus();
+
+        await emit("snip:ready", {});
+      });
     };
     setup();
 
     return () => {
-      if (unlisten) unlisten();
+      if (unlistenCapture) unlistenCapture();
+      if (unlistenStart) unlistenStart();
     };
   }, []);
 

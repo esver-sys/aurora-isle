@@ -1,20 +1,24 @@
-import { useCallback } from "react";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { useCallback, useRef } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
-import { getAllWindows, currentMonitor, type Window } from "@tauri-apps/api/window";
+import { getAllWindows, currentMonitor } from "@tauri-apps/api/window";
+import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
 import { captureScreen, copyImageToClipboard } from "../api/screenshot";
 import { pinImage } from "../api/pin";
 
-async function closeSnipWindow() {
-  const windows = await getAllWindows();
-  const snipWin = windows.find((w: Window) => w.label === "snip");
-  if (snipWin) await snipWin.close();
-}
-
 export function useScreenshot() {
+  const cleanupRef = useRef<(() => void) | null>(null);
+
   const takeScreenshot = useCallback(async () => {
     try {
-      await closeSnipWindow();
+      cleanupRef.current?.();
+      cleanupRef.current = null;
+
+      const windows = await getAllWindows();
+      const snipWin = windows.find((w) => w.label === "snip");
+      if (!snipWin) {
+        console.error("Snip window not found");
+        return;
+      }
 
       const monitor = await currentMonitor();
       if (!monitor) return;
@@ -23,69 +27,59 @@ export function useScreenshot() {
       const logicalWidth = Math.round(monitor.size.width / scaleFactor);
       const logicalHeight = Math.round(monitor.size.height / scaleFactor);
 
-      const snipWindow = new WebviewWindow("snip", {
-        url: "index.html",
-        title: "Snip",
-        transparent: true,
-        decorations: false,
-        alwaysOnTop: true,
-        skipTaskbar: true,
-        resizable: false,
-        visible: false,
-        width: logicalWidth,
-        height: logicalHeight,
-        x: 0,
-        y: 0,
-      });
-
-      snipWindow.once("tauri://error", (e) => {
-        console.error("Snip window creation failed:", e);
-      });
-
       const capturePromise = captureScreen();
+
+      await snipWin.setSize(new LogicalSize(logicalWidth, logicalHeight));
+      await snipWin.setPosition(new LogicalPosition(0, 0));
+
+      let unlistenReady: (() => void) | undefined;
+      let unlistenComplete: (() => void) | undefined;
+      let unlistenCancel: (() => void) | undefined;
 
       const cleanup = () => {
         unlistenReady?.();
         unlistenComplete?.();
         unlistenCancel?.();
       };
+      cleanupRef.current = cleanup;
 
-      let unlistenReady = await listen("snip:ready", async () => {
-        const result = await capturePromise;
-        await emit("snip:capture", {
-          tempPath: result.temp_path,
-          width: result.width,
-          height: result.height,
-          scaleFactor: result.scale_factor,
-        });
-      });
-
-      let unlistenComplete = await listen<{
-        action: "pin" | "copy";
-        croppedPath: string | null;
-      }>(
-        "snip:complete",
-        async (event) => {
-          cleanup();
-          await closeSnipWindow();
-          if (event.payload.croppedPath) {
-            try {
-              if (event.payload.action === "pin") {
-                await pinImage(event.payload.croppedPath);
-              } else {
-                await copyImageToClipboard(event.payload.croppedPath);
+      [unlistenReady, unlistenComplete, unlistenCancel] = await Promise.all([
+        listen("snip:ready", async () => {
+          const result = await capturePromise;
+          await emit("snip:capture", {
+            tempPath: result.temp_path,
+            width: result.width,
+            height: result.height,
+            scaleFactor: result.scale_factor,
+          });
+        }),
+        listen<{ action: "pin" | "copy"; croppedPath: string | null }>(
+          "snip:complete",
+          async (event) => {
+            cleanup();
+            cleanupRef.current = null;
+            await snipWin.hide();
+            if (event.payload.croppedPath) {
+              try {
+                if (event.payload.action === "pin") {
+                  await pinImage(event.payload.croppedPath);
+                } else {
+                  await copyImageToClipboard(event.payload.croppedPath);
+                }
+              } catch (e) {
+                console.error("Screenshot action failed:", e);
               }
-            } catch (e) {
-              console.error("Screenshot action failed:", e);
             }
           }
-        }
-      );
+        ),
+        listen("snip:cancel", async () => {
+          cleanup();
+          cleanupRef.current = null;
+          await snipWin.hide();
+        }),
+      ]);
 
-      let unlistenCancel = await listen("snip:cancel", async () => {
-        cleanup();
-        await closeSnipWindow();
-      });
+      await emit("snip:start", {});
     } catch (e) {
       console.error("Screenshot failed:", e);
     }

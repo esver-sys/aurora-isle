@@ -34,6 +34,20 @@
         "resizable": false,
         "visible": false,
         "shadow": true
+      },
+      {
+        "label": "snip",
+        "url": "index.html",
+        "title": "Snip",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "visible": false,
+        "shadow": false,
+        "width": 1920,
+        "height": 1080
       }
     ],
     "security": {

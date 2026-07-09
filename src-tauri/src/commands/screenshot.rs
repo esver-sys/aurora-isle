@@ -34,9 +34,9 @@ pub async fn capture_screen(state: State<'_, AppState>) -> Result<CaptureResult>
 
     let snip_dir = state.app_data_dir.join("snips");
     std::fs::create_dir_all(&snip_dir)?;
-    let filename = format!("capture_{}.png", now_ts());
+    let filename = format!("capture_{}.bmp", now_ts());
     let temp_path = snip_dir.join(filename);
-    img.save_with_format(&temp_path, ImageFormat::Png)
+    img.save_with_format(&temp_path, ImageFormat::Bmp)
         .map_err(|e| AppError::General(e.to_string()))?;
 
     Ok(CaptureResult {
