@@ -25,7 +25,7 @@ export function SettingsWindow() {
           title="关闭"
           onClick={handleClose}
         >
-          <X size={16} color="rgba(255,255,255,0.7)" />
+          <X size={16} color="rgba(0,0,0,0.6)" />
         </button>
       </div>
       <div className={styles.body}>

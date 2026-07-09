@@ -29,11 +29,11 @@
         "url": "index.html",
         "width": 720,
         "height": 520,
-        "transparent": true,
+        "transparent": false,
         "decorations": false,
         "resizable": false,
         "visible": false,
-        "shadow": false
+        "shadow": true
       }
     ],
     "security": {

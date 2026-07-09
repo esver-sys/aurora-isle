@@ -38,7 +38,7 @@ export function SettingsNav({ active, onChange }: SettingsNavProps) {
         >
           <Icon
             size={16}
-            color={active === key ? "white" : "rgba(255,255,255,0.6)"}
+            color={active === key ? "rgba(0,0,0,0.9)" : "rgba(0,0,0,0.5)"}
           />
           <span className={styles.navLabel}>{label}</span>
         </button>
